@@ -61,7 +61,7 @@ cd Htmlblocks
 ```
 
 ### Step 2: Open in Your Browser
-Simply open any HTML file in your web browser to see it in action!
+Simply open this link and you will find it directly https://ilyesjeridi5.github.io/Htmlblocks/
 
 ### Step 3: Start Learning
 Begin with the basic blocks and progressively move to more advanced concepts.
