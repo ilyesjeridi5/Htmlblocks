@@ -461,7 +461,7 @@
           <button onclick="setDevice('mobile',this)">📲 Mobile</button>
         </div>
         <div class="preview-container">
-          <iframe id="previewFrame" class="preview-desktop" sandbox="allow-scripts allow-forms allow-modals allow-same-origin"></iframe>
+          <iframe id="previewFrame" class="preview-desktop" sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"></iframe>
         </div>
       </div>
       <div class="tab-panel" id="tab-code">
@@ -1016,11 +1016,88 @@ B({ id:'media-avatar', cat:'media', icon:'👤', name:'Avatar (round photo)',
     return `<img src="${esc(v.url)}" style="width:${sizes[v.size]};height:${sizes[v.size]};border-radius:50%;object-fit:cover;${borders[v.border]!=='none'?`border:${borders[v.border]} solid ${v.borderColor};`:''}">`;
   }});
 
-B({ id:'media-youtube', cat:'media', icon:'📺', name:'YouTube Video',
-  desc:'Embed a YouTube video.',
-  fields:[{ key:'id', label:'YouTube Video ID', type:'text', default:'dQw4w9WgXcQ',
-    help:'The part after "watch?v=" in YouTube URL.' }],
-  render:v=>`<div style="max-width:800px;aspect-ratio:16/9;margin:0 auto;"><iframe src="https://www.youtube.com/embed/${esc(v.id)}" style="width:100%;height:100%;border:none;border-radius:12px;" allowfullscreen></iframe></div>` });
+B({ id:'media-youtube', cat:'media', icon:'📺', name:'Video Embed (YouTube / Vimeo / any URL)',
+  desc:'Paste any video link. Auto-detects YouTube, Vimeo, MP4 files. Always includes a fallback link to open the video.',
+  fields:[
+    { key:'url', label:'Video URL (paste any link)', type:'text',
+      default:'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      help:'Works with: youtube.com/watch?v=..., youtu.be/..., youtube.com/embed/..., shorts, vimeo.com/..., direct .mp4 files. Just paste the link from your browser!',
+      examples:['https://www.youtube.com/watch?v=dQw4w9WgXcQ','https://youtu.be/9bZkp7q19f0','https://vimeo.com/76979871'] },
+    { key:'autoplay', label:'Autoplay (muted)', type:'select', default:'no', options:['yes','no'] },
+    { key:'loop', label:'Loop video', type:'select', default:'no', options:['yes','no'] },
+    { key:'controls', label:'Show controls', type:'select', default:'yes', options:['yes','no'] },
+    { key:'width', label:'Width', type:'select', default:'large', options:['small','medium','large','full'] }
+  ],
+  render:function(v) {
+    var raw = (v.url || '').trim();
+    if (!raw) return '<div style="padding:20px;background:#fef3c7;color:#78350f;border-radius:8px;text-align:center;">⚠️ No video URL provided. Edit this block and paste a YouTube/Vimeo link.</div>';
+    var widths = { small:'400px', medium:'600px', large:'800px', full:'100%' };
+    var maxW = widths[v.width] || '800px';
+
+    // ===== Parse the URL =====
+    var ytId = '', vimeoId = '', dmId = '', isDirect = false, embedUrl = '', provider = '';
+    // YouTube formats
+    var yt = raw.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtube\.com\/v\/|youtube-nocookie\.com\/embed\/)([a-zA-Z0-9_-]{6,15})/);
+    if (yt) { ytId = yt[1]; provider = 'youtube'; }
+    if (!ytId) {
+      var vm = raw.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+      if (vm) { vimeoId = vm[1]; provider = 'vimeo'; }
+    }
+    if (!ytId && !vimeoId) {
+      var dm = raw.match(/dailymotion\.com\/(?:video|embed\/video)\/([a-zA-Z0-9]+)/);
+      if (dm) { dmId = dm[1]; provider = 'dailymotion'; }
+    }
+    // Direct video file
+    if (!ytId && !vimeoId && !dmId && /\.(mp4|webm|ogg|mov)(\?|#|$)/i.test(raw)) {
+      isDirect = true;
+    }
+    // Bare ID fallback
+    if (!ytId && !vimeoId && !dmId && !isDirect && /^[a-zA-Z0-9_-]{6,15}$/.test(raw)) {
+      ytId = raw; provider = 'youtube';
+    }
+
+    // ===== Direct video file =====
+    if (isDirect) {
+      var attrs = '';
+      if (v.controls === 'yes') attrs += ' controls';
+      if (v.autoplay === 'yes') attrs += ' autoplay muted playsinline';
+      if (v.loop === 'yes') attrs += ' loop';
+      return '<div style="max-width:' + maxW + ';margin:16px auto;"><video src="' + esc(raw) + '"' + attrs + ' style="width:100%;border-radius:12px;display:block;background:#000;"></video></div>';
+    }
+
+    // ===== Build YouTube embed (using nocookie domain to fix Error 153) =====
+    if (ytId) {
+      var params = ['rel=0', 'modestbranding=1', 'playsinline=1'];
+      if (v.autoplay === 'yes') { params.push('autoplay=1'); params.push('mute=1'); }
+      if (v.loop === 'yes') { params.push('loop=1'); params.push('playlist=' + ytId); }
+      if (v.controls === 'no') params.push('controls=0');
+      // Use nocookie domain - bypasses many embed restrictions including Error 153
+      embedUrl = 'https://www.youtube-nocookie.com/embed/' + ytId + '?' + params.join('&');
+      var watchUrl = 'https://www.youtube.com/watch?v=' + ytId;
+      var thumb = 'https://i.ytimg.com/vi/' + ytId + '/hqdefault.jpg';
+      // Iframe + fallback link
+      return '<div style="max-width:' + maxW + ';margin:16px auto;position:relative;"><div style="aspect-ratio:16/9;position:relative;border-radius:12px;overflow:hidden;background:#000;"><iframe src="' + embedUrl + '" style="width:100%;height:100%;border:none;display:block;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe></div><div style="margin-top:8px;text-align:center;font-size:0.85em;color:#64748b;">If video doesn\'t play: <a href="' + watchUrl + '" target="_blank" rel="noopener" style="color:#6366f1;font-weight:600;">▶️ Open on YouTube</a></div></div>';
+    }
+
+    // ===== Vimeo =====
+    if (vimeoId) {
+      var vparams = [];
+      if (v.autoplay === 'yes') { vparams.push('autoplay=1'); vparams.push('muted=1'); }
+      if (v.loop === 'yes') vparams.push('loop=1');
+      if (v.controls === 'no') vparams.push('controls=0');
+      embedUrl = 'https://player.vimeo.com/video/' + vimeoId + (vparams.length ? '?' + vparams.join('&') : '');
+      return '<div style="max-width:' + maxW + ';aspect-ratio:16/9;margin:16px auto;border-radius:12px;overflow:hidden;background:#000;"><iframe src="' + embedUrl + '" style="width:100%;height:100%;border:none;" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div>';
+    }
+
+    // ===== Dailymotion =====
+    if (dmId) {
+      embedUrl = 'https://www.dailymotion.com/embed/video/' + dmId;
+      return '<div style="max-width:' + maxW + ';aspect-ratio:16/9;margin:16px auto;border-radius:12px;overflow:hidden;background:#000;"><iframe src="' + embedUrl + '" style="width:100%;height:100%;border:none;" allowfullscreen allow="autoplay"></iframe></div>';
+    }
+
+    // ===== Unknown URL — just show a link =====
+    return '<div style="max-width:' + maxW + ';margin:16px auto;padding:24px;background:#fef3c7;color:#78350f;border-radius:8px;text-align:center;">⚠️ Could not detect video type for: <code style="background:rgba(0,0,0,0.1);padding:2px 6px;border-radius:4px;">' + esc(raw) + '</code><br><br>Paste a YouTube or Vimeo link, or a direct .mp4 URL. <br><br><a href="' + esc(raw) + '" target="_blank" style="color:#6366f1;font-weight:600;">🔗 Open link in new tab</a></div>';
+  }});
 
 B({ id:'media-gallery', cat:'media', icon:'🖼️', name:'Image Gallery',
   desc:'Grid of multiple images.',
@@ -1032,6 +1109,55 @@ B({ id:'media-gallery', cat:'media', icon:'🖼️', name:'Image Gallery',
   render:v=>{
     const imgs=v.images.split('\n').filter(Boolean).map(u=>`  <img src="${esc(u)}" style="width:100%;height:250px;object-fit:cover;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">`).join('\n');
     return `<div style="display:grid;grid-template-columns:repeat(${v.columns},1fr);gap:16px;max-width:1200px;margin:0 auto;">\n${imgs}\n</div>`;
+  }});
+
+B({ id:'media-pdf', cat:'media', icon:'📄', name:'PDF Viewer / Download Button',
+  desc:'Upload a PDF — creates a button that opens, downloads, or embeds the PDF on your page.',
+  fields:[
+    { key:'pdfData', label:'PDF File (click Upload to attach)', type:'pdf-upload', default:'',
+      help:'Click Upload PDF below to select a .pdf file from your computer.' },
+    { key:'fileName', label:'PDF File Name (auto-filled)', type:'text', default:'document.pdf' },
+    { key:'buttonText', label:'Button Text', type:'text', default:'📄 Open PDF',
+      examples:['📄 Open PDF','📥 Download PDF','📚 View Document','📑 Read More'] },
+    { key:'action', label:'When clicked', type:'select', default:'open-new-tab',
+      options:['open-new-tab','download','embed-inline'],
+      help:'open-new-tab = opens PDF in new browser tab. download = forces save. embed-inline = shows the PDF on the page right below the button when clicked.' },
+    { key:'preset', label:'Button Style', type:'select', default:'red-action',
+      options:['purple-gradient','blue-solid','green-success','red-action','dark-modern','outline-purple','white-on-dark'] },
+    { key:'size', label:'Button Size', type:'select', default:'large',
+      options:['small','medium','large','extra-large'] }
+  ],
+  render:function(v) {
+    var styles = {
+      'purple-gradient':'background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;box-shadow:0 4px 14px rgba(99,102,241,0.4)',
+      'blue-solid':'background:#3b82f6;color:white;box-shadow:0 4px 14px rgba(59,130,246,0.3)',
+      'green-success':'background:#10b981;color:white;box-shadow:0 4px 14px rgba(16,185,129,0.3)',
+      'red-action':'background:#ef4444;color:white;box-shadow:0 4px 14px rgba(239,68,68,0.3)',
+      'dark-modern':'background:#0f172a;color:white',
+      'outline-purple':'background:transparent;color:#6366f1;border:2px solid #6366f1',
+      'white-on-dark':'background:white;color:#0f172a'
+    };
+    var sizes = {
+      small:'padding:8px 16px;font-size:14px',
+      medium:'padding:12px 24px;font-size:16px',
+      large:'padding:14px 32px;font-size:17px',
+      'extra-large':'padding:18px 40px;font-size:18px'
+    };
+    var pdfUrl = v.pdfData || '';
+    var fileName = v.fileName || 'document.pdf';
+    if (!pdfUrl) {
+      return '<div style="padding:14px 18px;background:#fef3c7;color:#78350f;border-radius:8px;border:1px dashed #fbbf24;display:inline-block;">⚠️ No PDF uploaded yet. Edit this block and click Upload PDF.</div>';
+    }
+    var border = v.preset === 'outline-purple' ? '2px solid #6366f1' : 'none';
+    var btnStyle = styles[v.preset] + ';' + sizes[v.size] + ';border:' + border + ';border-radius:10px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-block;';
+    if (v.action === 'embed-inline') {
+      var uid2 = 'pdf' + Math.random().toString(36).slice(2, 8);
+      return '<button onclick="var f=document.getElementById(\'' + uid2 + '\');f.style.display=f.style.display===\'none\'?\'block\':\'none\';" style="' + btnStyle + '">' + esc(v.buttonText) + '</button>\n<iframe id="' + uid2 + '" src="' + pdfUrl + '" style="width:100%;max-width:900px;height:600px;border:1px solid #e2e8f0;border-radius:8px;margin-top:12px;display:none;"></iframe>';
+    } else if (v.action === 'download') {
+      return '<a href="' + pdfUrl + '" download="' + esc(fileName) + '" style="' + btnStyle + '">' + esc(v.buttonText) + '</a>';
+    } else {
+      return '<a href="' + pdfUrl + '" target="_blank" rel="noopener" style="' + btnStyle + '">' + esc(v.buttonText) + '</a>';
+    }
   }});
 
 B({ id:'media-icon', cat:'media', icon:'⭐', name:'Big Emoji Icon',
@@ -1717,49 +1843,195 @@ B({ id:'tpl-pricing', cat:'template', icon:'💰', name:'Pricing Table (3 tiers)
   }});
 
 B({ id:'tpl-team', cat:'template', icon:'👥', name:'Team Members Section',
-  desc:'3 team members with photos.',
+  desc:'3 team members with photos — upload your own photos!',
   fields:[
     { key:'title', label:'Title', type:'text', default:'Meet The Team' },
+    { key:'m1img', label:'Member 1 Photo (upload your own!)', type:'url', default:'https://i.pravatar.cc/200?img=1' },
     { key:'m1n', label:'Member 1 Name', type:'text', default:'Alice Johnson' },
     { key:'m1r', label:'Member 1 Role', type:'text', default:'CEO' },
+    { key:'m2img', label:'Member 2 Photo (upload your own!)', type:'url', default:'https://i.pravatar.cc/200?img=2' },
     { key:'m2n', label:'Member 2 Name', type:'text', default:'Bob Smith' },
     { key:'m2r', label:'Member 2 Role', type:'text', default:'CTO' },
+    { key:'m3img', label:'Member 3 Photo (upload your own!)', type:'url', default:'https://i.pravatar.cc/200?img=3' },
     { key:'m3n', label:'Member 3 Name', type:'text', default:'Carol Davis' },
     { key:'m3r', label:'Member 3 Role', type:'text', default:'Designer' }
   ],
   render:v=>{
-    const m=(n,r,i)=>`<div style="text-align:center;"><img src="https://i.pravatar.cc/200?img=${i}" style="width:150px;height:150px;border-radius:50%;margin-bottom:16px;object-fit:cover;box-shadow:0 8px 25px rgba(0,0,0,0.1);"><h3 style="font-size:1.2em;margin-bottom:4px;">${esc(n)}</h3><p style="color:#6366f1;font-weight:600;">${esc(r)}</p></div>`;
-    return `<section style="padding:80px 24px;background:white;">\n  <h2 style="text-align:center;font-size:2.5em;margin-bottom:50px;">${esc(v.title)}</h2>\n  <div style="max-width:1000px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:30px;">\n    ${m(v.m1n,v.m1r,1)}\n    ${m(v.m2n,v.m2r,2)}\n    ${m(v.m3n,v.m3r,3)}\n  </div>\n</section>`;
+    const m=(n,r,img)=>`<div style="text-align:center;"><img src="${esc(img)}" style="width:150px;height:150px;border-radius:50%;margin-bottom:16px;object-fit:cover;box-shadow:0 8px 25px rgba(0,0,0,0.1);"><h3 style="font-size:1.2em;margin-bottom:4px;">${esc(n)}</h3><p style="color:#6366f1;font-weight:600;">${esc(r)}</p></div>`;
+    return `<section style="padding:80px 24px;background:white;">\n  <h2 style="text-align:center;font-size:2.5em;margin-bottom:50px;">${esc(v.title)}</h2>\n  <div style="max-width:1000px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:30px;">\n    ${m(v.m1n,v.m1r,v.m1img)}\n    ${m(v.m2n,v.m2r,v.m2img)}\n    ${m(v.m3n,v.m3r,v.m3img)}\n  </div>\n</section>`;
   }});
 
-B({ id:'tpl-footer', cat:'template', icon:'👣', name:'Professional Footer',
-  desc:'Full footer with links and copyright.',
+B({ id:'tpl-footer', cat:'template', icon:'👣', name:'Professional Footer (Customizable)',
+  desc:'Fully customizable footer — toggle each section ON or OFF and fill in your info.',
   fields:[
-    { key:'company', label:'Company Name', type:'text', default:'Acme Inc.' },
-    { key:'tagline', label:'Tagline', type:'text', default:'Building amazing things.' }
+    { key:'bgColor', label:'Background Color', type:'color', default:'#0f172a',
+      presets:['#0f172a','#1e293b','#000000','#6366f1','#ffffff','#f8fafc','#fef3c7'] },
+    { key:'textColor', label:'Text Color', type:'color', default:'#ffffff',
+      presets:['#ffffff','#0f172a','#64748b','#94a3b8','#6366f1'] },
+
+    { key:'showCompany', label:'➤ SHOW Company Info Column?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'company', label:'  Company Name', type:'text', default:'Acme Inc.' },
+    { key:'tagline', label:'  Tagline / About', type:'textarea', default:'Building amazing things for the world.' },
+
+    { key:'showContact', label:'➤ SHOW Contact Info Column?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'contactTitle', label:'  Contact Section Title', type:'text', default:'Contact Us' },
+    { key:'showEmail', label:'    • Show Email?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'email', label:'      Email Address', type:'text', default:'hello@example.com' },
+    { key:'showPhone', label:'    • Show Phone?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'phone', label:'      Phone Number', type:'text', default:'+1 (555) 123-4567' },
+    { key:'showAddress', label:'    • Show Address?', type:'select', default:'no', options:['yes','no'] },
+    { key:'address', label:'      Address', type:'text', default:'123 Main St, City, Country' },
+    { key:'showWebsite', label:'    • Show Website?', type:'select', default:'no', options:['yes','no'] },
+    { key:'website', label:'      Website URL', type:'text', default:'https://example.com' },
+
+    { key:'showLinks1', label:'➤ SHOW Links Column 1?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'links1Title', label:'  Column 1 Title', type:'text', default:'Product' },
+    { key:'links1Items', label:'  Column 1 Links (one per line, format: "Text | URL")', type:'textarea',
+      default:'Features | #features\nPricing | #pricing\nFAQ | #faq',
+      help:'One link per line. Format: "Link text | URL" (with a | separator). URL is optional.' },
+
+    { key:'showLinks2', label:'➤ SHOW Links Column 2?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'links2Title', label:'  Column 2 Title', type:'text', default:'Company' },
+    { key:'links2Items', label:'  Column 2 Links (one per line)', type:'textarea',
+      default:'About | /about\nBlog | /blog\nContact | /contact' },
+
+    { key:'showLinks3', label:'➤ SHOW Links Column 3?', type:'select', default:'no', options:['yes','no'] },
+    { key:'links3Title', label:'  Column 3 Title', type:'text', default:'Legal' },
+    { key:'links3Items', label:'  Column 3 Links', type:'textarea',
+      default:'Privacy Policy | /privacy\nTerms of Service | /terms\nCookies | /cookies' },
+
+    { key:'showSocial', label:'➤ SHOW Social Media Icons?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'socialTitle', label:'  Social Section Title', type:'text', default:'Follow Us' },
+    { key:'social_twitter', label:'    • Twitter/X URL (empty to hide)', type:'text', default:'https://twitter.com/yourhandle' },
+    { key:'social_facebook', label:'    • Facebook URL', type:'text', default:'https://facebook.com/yourpage' },
+    { key:'social_instagram', label:'    • Instagram URL', type:'text', default:'https://instagram.com/yourhandle' },
+    { key:'social_linkedin', label:'    • LinkedIn URL', type:'text', default:'' },
+    { key:'social_youtube', label:'    • YouTube URL', type:'text', default:'' },
+    { key:'social_github', label:'    • GitHub URL', type:'text', default:'' },
+    { key:'social_whatsapp', label:'    • WhatsApp URL', type:'text', default:'' },
+    { key:'social_tiktok', label:'    • TikTok URL', type:'text', default:'' },
+
+    { key:'showNewsletter', label:'➤ SHOW Newsletter Signup?', type:'select', default:'no', options:['yes','no'] },
+    { key:'newsletterTitle', label:'  Newsletter Title', type:'text', default:'Stay Updated' },
+    { key:'newsletterText', label:'  Newsletter Description', type:'text', default:'Subscribe to our newsletter for updates.' },
+    { key:'newsletterBtn', label:'  Subscribe Button Text', type:'text', default:'Subscribe' },
+
+    { key:'showCopyright', label:'➤ SHOW Copyright Notice?', type:'select', default:'yes', options:['yes','no'] },
+    { key:'copyrightText', label:'  Copyright Text (use {company} and {year} as placeholders)', type:'text', default:'© {year} {company}. All rights reserved.' }
   ],
-  render:v=>`<footer style="background:#0f172a;color:white;padding:60px 24px 30px;">\n  <div style="max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:40px;margin-bottom:40px;">\n    <div><h3 style="font-size:1.4em;margin-bottom:10px;">${esc(v.company)}</h3><p style="color:#94a3b8;line-height:1.6;">${esc(v.tagline)}</p></div>\n    <div><h4 style="margin-bottom:14px;">Product</h4><ul style="list-style:none;line-height:2;color:#cbd5e1;"><li>Features</li><li>Pricing</li><li>FAQ</li></ul></div>\n    <div><h4 style="margin-bottom:14px;">Company</h4><ul style="list-style:none;line-height:2;color:#cbd5e1;"><li>About</li><li>Blog</li><li>Contact</li></ul></div>\n    <div><h4 style="margin-bottom:14px;">Connect</h4><div style="display:flex;gap:12px;font-size:1.5em;">🐦 📘 📷 💼</div></div>\n  </div>\n  <div style="border-top:1px solid #1e293b;padding-top:24px;text-align:center;color:#64748b;font-size:0.88em;">© 2024 ${esc(v.company)}. All rights reserved.</div>\n</footer>` });
+  render:function(v) {
+    var columns = [];
+
+    // Company info column
+    if (v.showCompany === 'yes') {
+      columns.push('<div><h3 style="font-size:1.4em;margin-bottom:10px;color:' + v.textColor + ';">' + esc(v.company) + '</h3><p style="color:' + dim(v.textColor) + ';line-height:1.6;">' + esc(v.tagline) + '</p></div>');
+    }
+
+    // Contact info column
+    if (v.showContact === 'yes') {
+      var contactItems = [];
+      if (v.showEmail === 'yes' && v.email) contactItems.push('<li>📧 <a href="mailto:' + esc(v.email) + '" style="color:' + dim(v.textColor) + ';text-decoration:none;">' + esc(v.email) + '</a></li>');
+      if (v.showPhone === 'yes' && v.phone) contactItems.push('<li>📞 <a href="tel:' + esc(v.phone).replace(/[^+0-9]/g,'') + '" style="color:' + dim(v.textColor) + ';text-decoration:none;">' + esc(v.phone) + '</a></li>');
+      if (v.showAddress === 'yes' && v.address) contactItems.push('<li>📍 <span style="color:' + dim(v.textColor) + ';">' + esc(v.address) + '</span></li>');
+      if (v.showWebsite === 'yes' && v.website) contactItems.push('<li>🌐 <a href="' + esc(v.website) + '" target="_blank" style="color:' + dim(v.textColor) + ';text-decoration:none;">' + esc(v.website.replace(/^https?:\/\//,'')) + '</a></li>');
+      if (contactItems.length) {
+        columns.push('<div><h4 style="margin-bottom:14px;color:' + v.textColor + ';">' + esc(v.contactTitle) + '</h4><ul style="list-style:none;line-height:2.2;">' + contactItems.join('') + '</ul></div>');
+      }
+    }
+
+    // Helper for link columns
+    function buildLinkCol(title, itemsRaw) {
+      var lines = (itemsRaw||'').split('\n').map(function(l){return l.trim();}).filter(Boolean);
+      if (!lines.length) return '';
+      var items = lines.map(function(line){
+        var parts = line.split('|').map(function(p){return p.trim();});
+        var text = parts[0] || 'Link';
+        var url = parts[1] || '#';
+        return '<li><a href="' + esc(url) + '" style="color:' + dim(v.textColor) + ';text-decoration:none;">' + esc(text) + '</a></li>';
+      }).join('');
+      return '<div><h4 style="margin-bottom:14px;color:' + v.textColor + ';">' + esc(title) + '</h4><ul style="list-style:none;line-height:2;">' + items + '</ul></div>';
+    }
+    if (v.showLinks1 === 'yes') columns.push(buildLinkCol(v.links1Title, v.links1Items));
+    if (v.showLinks2 === 'yes') columns.push(buildLinkCol(v.links2Title, v.links2Items));
+    if (v.showLinks3 === 'yes') columns.push(buildLinkCol(v.links3Title, v.links3Items));
+
+    // Social media
+    if (v.showSocial === 'yes') {
+      var socials = [];
+      var socialMap = [
+        ['social_twitter', '🐦', '#1da1f2'],
+        ['social_facebook', '📘', '#1877f2'],
+        ['social_instagram', '📷', '#e4405f'],
+        ['social_linkedin', '💼', '#0a66c2'],
+        ['social_youtube', '📺', '#ff0000'],
+        ['social_github', '🐙', '#181717'],
+        ['social_whatsapp', '💬', '#25d366'],
+        ['social_tiktok', '🎵', '#000000']
+      ];
+      socialMap.forEach(function(s){
+        if (v[s[0]] && v[s[0]].trim()) {
+          socials.push('<a href="' + esc(v[s[0]]) + '" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;background:' + s[2] + ';color:white;border-radius:50%;text-decoration:none;font-size:1.1em;">' + s[1] + '</a>');
+        }
+      });
+      if (socials.length) {
+        columns.push('<div><h4 style="margin-bottom:14px;color:' + v.textColor + ';">' + esc(v.socialTitle) + '</h4><div style="display:flex;gap:8px;flex-wrap:wrap;">' + socials.join('') + '</div></div>');
+      }
+    }
+
+    // Newsletter
+    if (v.showNewsletter === 'yes') {
+      columns.push('<div><h4 style="margin-bottom:14px;color:' + v.textColor + ';">' + esc(v.newsletterTitle) + '</h4><p style="color:' + dim(v.textColor) + ';font-size:0.9em;margin-bottom:10px;line-height:1.5;">' + esc(v.newsletterText) + '</p><form onsubmit="event.preventDefault();alert(\'Subscribed!\');this.reset();" style="display:flex;gap:6px;"><input type="email" placeholder="your@email.com" required style="flex:1;padding:9px 12px;border:1px solid ' + dim(v.textColor) + ';border-radius:6px;background:rgba(255,255,255,0.05);color:' + v.textColor + ';font-size:0.9em;"><button type="submit" style="background:#6366f1;color:white;border:none;padding:9px 14px;border-radius:6px;font-weight:600;cursor:pointer;font-size:0.9em;">' + esc(v.newsletterBtn) + '</button></form></div>');
+    }
+
+    var columnsHTML = columns.length ? '<div style="max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:40px;margin-bottom:40px;">' + columns.join('') + '</div>' : '';
+
+    // Copyright
+    var copyright = '';
+    if (v.showCopyright === 'yes' && v.copyrightText) {
+      var txt = String(v.copyrightText).replace(/\{company\}/g, v.company).replace(/\{year\}/g, new Date().getFullYear());
+      copyright = '<div style="border-top:1px solid ' + dim(v.textColor, 0.15) + ';padding-top:24px;text-align:center;color:' + dim(v.textColor) + ';font-size:0.88em;">' + esc(txt) + '</div>';
+    }
+
+    return '<footer style="background:' + v.bgColor + ';color:' + v.textColor + ';padding:60px 24px 30px;">' + columnsHTML + copyright + '</footer>';
+  }});
+
+// Helper for dimmed text colors
+function dim(color, alpha) {
+  alpha = alpha || 0.65;
+  if (!color) return 'rgba(255,255,255,0.65)';
+  if (color === '#ffffff' || color.toLowerCase() === '#fff') return 'rgba(255,255,255,' + alpha + ')';
+  if (color === '#000000' || color.toLowerCase() === '#000') return 'rgba(0,0,0,' + alpha + ')';
+  // For other colors, just slightly desaturate by mixing with parent (simple approximation)
+  if (color.startsWith('#')) {
+    var r = parseInt(color.slice(1,3),16), g = parseInt(color.slice(3,5),16), b = parseInt(color.slice(5,7),16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+  }
+  return color;
+}
 
 
 // ----- 20+ PROFESSIONAL TEMPLATES (NEW) -----
 
 B({ id:'tpl-testimonials', cat:'template', icon:'💬', name:'Customer Testimonials (3 reviews)',
-  desc:'Beautiful testimonials with star ratings and avatars.',
+  desc:'Beautiful testimonials with star ratings and photos — upload your own avatars!',
   fields:[
     { key:'title', label:'Section Title', type:'text', default:'What Our Customers Say' },
+    { key:'a1', label:'Customer 1 Photo (upload!)', type:'url', default:'https://i.pravatar.cc/60?img=11' },
     { key:'q1', label:'Quote 1', type:'textarea', default:'Best product ever! Changed my workflow completely.' },
     { key:'n1', label:'Name 1', type:'text', default:'Sarah Williams' },
     { key:'r1', label:'Role 1', type:'text', default:'Designer at Studio Co.' },
+    { key:'a2', label:'Customer 2 Photo (upload!)', type:'url', default:'https://i.pravatar.cc/60?img=22' },
     { key:'q2', label:'Quote 2', type:'textarea', default:'Excellent service and quality. Highly recommended!' },
     { key:'n2', label:'Name 2', type:'text', default:'Mike Chen' },
     { key:'r2', label:'Role 2', type:'text', default:'CEO of TechCorp' },
+    { key:'a3', label:'Customer 3 Photo (upload!)', type:'url', default:'https://i.pravatar.cc/60?img=33' },
     { key:'q3', label:'Quote 3', type:'textarea', default:'Five stars! Will definitely use again.' },
     { key:'n3', label:'Name 3', type:'text', default:'Emma Rodriguez' },
     { key:'r3', label:'Role 3', type:'text', default:'Marketing Lead' }
   ],
   render:v=>{
-    const card = (q,n,r,i)=>`<div style="background:white;padding:32px 28px;border-radius:16px;box-shadow:0 8px 25px rgba(0,0,0,0.06);"><div style="color:#fbbf24;font-size:1.2em;margin-bottom:12px;">★★★★★</div><p style="font-size:1.05em;color:#334155;line-height:1.7;margin-bottom:20px;font-style:italic;">"${esc(q)}"</p><div style="display:flex;align-items:center;gap:12px;"><img src="https://i.pravatar.cc/60?img=${i}" style="width:48px;height:48px;border-radius:50%;"><div><div style="font-weight:700;color:#0f172a;">${esc(n)}</div><div style="font-size:0.85em;color:#64748b;">${esc(r)}</div></div></div></div>`;
-    return `<section style="padding:80px 24px;background:#f8fafc;">\n  <h2 style="text-align:center;font-size:2.5em;margin-bottom:50px;color:#0f172a;">${esc(v.title)}</h2>\n  <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;">\n    ${card(v.q1,v.n1,v.r1,11)}\n    ${card(v.q2,v.n2,v.r2,22)}\n    ${card(v.q3,v.n3,v.r3,33)}\n  </div>\n</section>`;
+    const card = (q,n,r,img)=>`<div style="background:white;padding:32px 28px;border-radius:16px;box-shadow:0 8px 25px rgba(0,0,0,0.06);"><div style="color:#fbbf24;font-size:1.2em;margin-bottom:12px;">★★★★★</div><p style="font-size:1.05em;color:#334155;line-height:1.7;margin-bottom:20px;font-style:italic;">"${esc(q)}"</p><div style="display:flex;align-items:center;gap:12px;"><img src="${esc(img)}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;"><div><div style="font-weight:700;color:#0f172a;">${esc(n)}</div><div style="font-size:0.85em;color:#64748b;">${esc(r)}</div></div></div></div>`;
+    return `<section style="padding:80px 24px;background:#f8fafc;">\n  <h2 style="text-align:center;font-size:2.5em;margin-bottom:50px;color:#0f172a;">${esc(v.title)}</h2>\n  <div style="max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;">\n    ${card(v.q1,v.n1,v.r1,v.a1)}\n    ${card(v.q2,v.n2,v.r2,v.a2)}\n    ${card(v.q3,v.n3,v.r3,v.a3)}\n  </div>\n</section>`;
   }});
 
 B({ id:'tpl-faq', cat:'template', icon:'❓', name:'FAQ Section (Expandable)',
@@ -2032,14 +2304,42 @@ B({ id:'tpl-comparison', cat:'template', icon:'⚖️', name:'Comparison Table',
   }});
 
 B({ id:'tpl-video-section', cat:'template', icon:'🎥', name:'Video Hero Section',
-  desc:'Hero with embedded video on right side.',
+  desc:'Hero with embedded video. Paste any YouTube/Vimeo link.',
   fields:[
     { key:'title', label:'Title', type:'text', default:'See It In Action' },
     { key:'subtitle', label:'Subtitle', type:'textarea', default:'Watch this short video to learn how our product can transform your workflow.' },
-    { key:'videoId', label:'YouTube Video ID', type:'text', default:'dQw4w9WgXcQ',
-      help:'The part after watch?v= in YouTube URL' }
+    { key:'videoUrl', label:'Video URL (any link)', type:'text',
+      default:'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      help:'Paste full YouTube/Vimeo URL — auto-detected. Uses nocookie domain to bypass embed errors.',
+      examples:['https://www.youtube.com/watch?v=dQw4w9WgXcQ','https://youtu.be/9bZkp7q19f0','https://vimeo.com/76979871'] }
   ],
-  render:v=>`<section style="padding:80px 24px;background:#f8fafc;">\n  <div style="max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:50px;align-items:center;">\n    <div><h2 style="font-size:2.5em;font-weight:800;color:#0f172a;margin-bottom:18px;line-height:1.2;">${esc(v.title)}</h2><p style="color:#475569;font-size:1.1em;line-height:1.8;">${esc(v.subtitle)}</p></div>\n    <div style="aspect-ratio:16/9;border-radius:16px;overflow:hidden;box-shadow:0 15px 40px rgba(0,0,0,0.15);"><iframe src="https://www.youtube.com/embed/${esc(v.videoId)}" style="width:100%;height:100%;border:none;" allowfullscreen></iframe></div>\n  </div>\n</section>` });
+  render:function(v) {
+    var raw = (v.videoUrl || '').trim();
+    var embedUrl = 'about:blank';
+    var watchUrl = '#';
+    var ytId = '';
+    var yt = raw.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{6,15})/);
+    if (yt) {
+      ytId = yt[1];
+      embedUrl = 'https://www.youtube-nocookie.com/embed/' + ytId + '?rel=0&modestbranding=1&playsinline=1';
+      watchUrl = 'https://www.youtube.com/watch?v=' + ytId;
+    } else {
+      var vm = raw.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+      if (vm) {
+        embedUrl = 'https://player.vimeo.com/video/' + vm[1];
+        watchUrl = 'https://vimeo.com/' + vm[1];
+      } else if (/^[a-zA-Z0-9_-]{6,15}$/.test(raw)) {
+        ytId = raw;
+        embedUrl = 'https://www.youtube-nocookie.com/embed/' + ytId + '?rel=0&modestbranding=1&playsinline=1';
+        watchUrl = 'https://www.youtube.com/watch?v=' + ytId;
+      } else if (raw.startsWith('http')) {
+        embedUrl = raw;
+        watchUrl = raw;
+      }
+    }
+    var fallback = watchUrl !== '#' ? '<div style="margin-top:8px;text-align:center;font-size:0.85em;color:#64748b;">Not playing? <a href="' + watchUrl + '" target="_blank" rel="noopener" style="color:#6366f1;font-weight:600;">▶️ Open video</a></div>' : '';
+    return '<section style="padding:80px 24px;background:#f8fafc;">\n  <div style="max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:50px;align-items:center;">\n    <div><h2 style="font-size:2.5em;font-weight:800;color:#0f172a;margin-bottom:18px;line-height:1.2;">' + esc(v.title) + '</h2><p style="color:#475569;font-size:1.1em;line-height:1.8;">' + esc(v.subtitle) + '</p></div>\n    <div><div style="aspect-ratio:16/9;border-radius:16px;overflow:hidden;box-shadow:0 15px 40px rgba(0,0,0,0.15);background:#000;"><iframe src="' + esc(embedUrl) + '" style="width:100%;height:100%;border:none;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe></div>' + fallback + '</div>\n  </div>\n</section>';
+  }});
 
 B({ id:'tpl-logos-bar', cat:'template', icon:'🏢', name:'Trusted By (Logo Bar)',
   desc:'Show logos of companies that trust you.',
@@ -2338,6 +2638,29 @@ function renderField(node, field) {
     }
   } else if (field.type === 'number') {
     input = `<input type="number" value="${esc(val)}" oninput="updateField('${node.id}','${field.key}',this.value)">`;
+  } else if (field.type === 'pdf-upload') {
+    const uploadId = id + '_pdfin';
+    const hasFile = val && val.startsWith('data:');
+    input = `<div style="display:flex; gap:6px; align-items:stretch;">
+      <input type="text" value="${hasFile ? '✅ PDF attached' : '(no PDF yet)'}" readonly style="flex:1; background:${hasFile ? '#d1fae5' : '#fef3c7'}; color:${hasFile ? '#065f46' : '#78350f'}; cursor:default;">
+      <button type="button" onclick="document.getElementById('${uploadId}').click()" style="background:#ef4444;color:white;border:none;padding:0 14px;border-radius:7px;cursor:pointer;font-size:0.85em;font-weight:600;white-space:nowrap;">📤 Upload PDF</button>
+      <input type="file" id="${uploadId}" accept="application/pdf,.pdf" style="display:none;" onchange="handlePDFUpload(event,'${node.id}','${field.key}','fileName')">
+    </div>`;
+    if (hasFile) {
+      const sizeKB = Math.round(val.length * 0.75 / 1024);
+      input += `<div style="margin-top:4px; font-size:0.75em; color:#64748b;">📊 Size: ~${sizeKB} KB · Click button above to replace</div>`;
+    }
+  } else if (field.type === 'url' || (field.key && /url|image|src|photo|pic|avatar|background|img/i.test(field.key) || /^[aip]\d+$/.test(field.key) || /^[ap]\d+i$/.test(field.key) || /^m\d+img$/.test(field.key))) {
+    // URL field with image upload option
+    const uploadId = id + '_imgin';
+    input = `<div style="display:flex; gap:6px; align-items:stretch;">
+      <input type="url" value="${esc(val||'')}" oninput="updateField('${node.id}','${field.key}',this.value)" placeholder="Paste URL or click Upload ➡️" style="flex:1;">
+      <button type="button" onclick="document.getElementById('${uploadId}').click()" title="Upload image from your device" style="background:#10b981;color:white;border:none;padding:0 12px;border-radius:7px;cursor:pointer;font-size:0.85em;font-weight:600;white-space:nowrap;">📤 Upload</button>
+      <input type="file" id="${uploadId}" accept="image/*" style="display:none;" onchange="handleImageUpload(event,'${node.id}','${field.key}')">
+    </div>`;
+    if (val && (val.startsWith('http') || val.startsWith('data:'))) {
+      input += `<div style="margin-top:6px;"><img src="${esc(val)}" style="max-width:120px; max-height:80px; border-radius:4px; border:1px solid #e2e8f0; object-fit:cover;" onerror="this.style.display='none'"></div>`;
+    }
   } else {
     input = `<input type="${field.type==='url'?'url':'text'}" value="${esc(val||'')}" oninput="updateField('${node.id}','${field.key}',this.value)" placeholder="${esc(field.default||'')}">`;
   }
@@ -2351,6 +2674,43 @@ function renderField(node, field) {
     ${examples}
   </div>`;
 }
+
+// ===== IMAGE / PDF UPLOAD HELPERS =====
+function handleImageUpload(event, nodeId, fieldKey) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    if (!confirm('This image is ' + (file.size/1024/1024).toFixed(1) + ' MB. Large images bloat your project. Continue?')) return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    updateField(nodeId, fieldKey, e.target.result);
+    renderWorkspace();
+    toast('🖼️ Image uploaded (' + (file.size/1024).toFixed(0) + ' KB)');
+  };
+  reader.onerror = function() { alert('❌ Failed to read image'); };
+  reader.readAsDataURL(file);
+}
+
+function handlePDFUpload(event, nodeId, fieldKey, nameKey) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) {
+    if (!confirm('This PDF is ' + (file.size/1024/1024).toFixed(1) + ' MB. Large files bloat your project. Continue?')) return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    updateField(nodeId, fieldKey, e.target.result);
+    if (nameKey) updateField(nodeId, nameKey, file.name);
+    renderWorkspace();
+    toast('📄 PDF uploaded (' + (file.size/1024).toFixed(0) + ' KB)');
+  };
+  reader.onerror = function() { alert('❌ Failed to read PDF'); };
+  reader.readAsDataURL(file);
+}
+
+window.handleImageUpload = handleImageUpload;
+window.handlePDFUpload = handlePDFUpload;
 
 function updateField(nodeId, key, value) {
   const r = findNode(nodeId);
@@ -3668,5 +4028,5 @@ function maybeShowWelcome() {
 }
 </script>
 
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a036ee1add714a32',t:'MTc4MDA3MjcxMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a036ee1add714a32',t:'MTc4MDA3MjcxMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a065e12b283be28c',t:'MTc4MDU2NTAxNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
